@@ -11,6 +11,12 @@ import (
 type cx = context.Context
 type Func func(t *testing.T, client *PrismaClient, ctx cx)
 
+var Databases = []test.Database{
+	test.MySQL,
+	test.PostgreSQL,
+	test.SQLite,
+}
+
 func TestUpsert(t *testing.T) {
 	t.Parallel()
 
@@ -85,6 +91,66 @@ func TestUpsert(t *testing.T) {
 			massert.Equal(t, expected, actual)
 		},
 	}, {
+		name: "CreateOrUpdate when record does not exist",
+		run: func(t *testing.T, client *PrismaClient, ctx cx) {
+			actual, err := client.Post.UpsertOne(
+				Post.ID.Equals("upsert"),
+			).CreateOrUpdate(
+				Post.Title.Set("title"),
+				Post.Views.Set(0),
+			).Exec(ctx)
+			if err != nil {
+				t.Fatalf("fail %s", err)
+			}
+
+			expected := &PostModel{
+				InnerPost: InnerPost{
+					ID:    actual.ID,
+					Title: "title",
+					Views: 0,
+				},
+			}
+
+			massert.Equal(t, expected, actual)
+		},
+	}, {
+		name: "CreateOrUpdate when record exists",
+		before: []string{`
+		mutation {
+			result: createOnePost(data: {
+				id: "upsert",
+				title: "title",
+				views: 0,
+			}) {
+				id
+			}
+		}
+	`},
+		run: func(t *testing.T, client *PrismaClient, ctx cx) {
+			actual, err := client.Post.UpsertOne(
+				Post.ID.Equals("upsert"),
+			).CreateOrUpdate(
+				Post.Title.Set("title"),
+				Post.Views.Set(2),
+				Post.Description.Set("random desc"),
+			).Exec(ctx)
+			if err != nil {
+				t.Fatalf("fail %s", err)
+			}
+
+			desc := "random desc"
+			expected := &PostModel{
+				InnerPost: InnerPost{
+					ID:          "upsert",
+					Title:       "title",
+					Views:       2,
+					Description: &desc,
+				},
+			}
+
+			massert.Equal(t, expected, actual)
+		},
+	}, {
 		name: "transaction",
 		// language=GraphQL
 		before: []string{`
@@ -124,11 +190,46 @@ func TestUpsert(t *testing.T) {
 
 			massert.Equal(t, expected, query.Result())
 		},
+	}, {
+		name: "transaction CreateOrUpdate",
+		before: []string{`
+			mutation {
+				result: createOnePost(data: {
+					id: "upsert",
+					title: "title",
+					views: 2,
+				}) {
+					id
+				}
+			}
+		`},
+		run: func(t *testing.T, client *PrismaClient, ctx cx) {
+			query := client.Post.UpsertOne(
+				Post.ID.Equals("upsert"),
+			).CreateOrUpdate(
+				Post.Title.Set("title"),
+				Post.Views.Set(3),
+			).Tx()
+
+			if err := client.Prisma.Transaction(query).Exec(ctx); err != nil {
+				t.Fatalf("fail %s", err)
+			}
+
+			expected := &PostModel{
+				InnerPost: InnerPost{
+					ID:    "upsert",
+					Title: "title",
+					Views: 3,
+				},
+			}
+
+			massert.Equal(t, expected, query.Result())
+		},
 	}}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			test.RunSerial(t, test.Databases, func(t *testing.T, db test.Database, ctx context.Context) {
+			test.RunSerial(t, Databases, func(t *testing.T, db test.Database, ctx context.Context) {
 				client := NewClient()
 				mockDBName := test.Start(t, db, client.Engine, tt.before)
 				defer test.End(t, db, client.Engine, mockDBName)

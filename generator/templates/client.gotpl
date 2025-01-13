@@ -5,6 +5,7 @@ const datasources = `{{ .GetDatasourcesJSON }}`
 const schema = `{{ .EscapedDatamodel }}`
 const schemaDatasourceURL = "{{ .GetSanitizedDatasourceURL }}"
 const schemaEnvVarName = "{{ (index .Datasources 0).URL.FromEnvVar }}"
+const providerName = "{{ (index .Datasources 0).Provider }}"
 
 {{ $hasBinaryTargets := false }}
 {{ if gt (len .Generator.BinaryTargets) 0 }}
